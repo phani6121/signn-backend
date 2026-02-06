@@ -1,0 +1,82 @@
+[
+  {
+    "username": "testuser1",
+    "password": "123456",
+    "email": "testuser1@example.com",
+    "name": "Test User 1",
+    "phone": "+1234567891",
+    "role": "driver"
+  },
+  {
+    "username": "testuser2",
+    "password": "123456",
+    "email": "testuser2@example.com",
+    "name": "Test User 2",
+    "phone": "+1234567892",
+    "role": "driver"
+  },
+  {
+    "username": "testuser3",
+    "password": "123456",
+    "email": "testuser3@example.com",
+    "name": "Test User 3",
+    "phone": "+1234567893",
+    "role": "driver"
+  },
+  {
+    "username": "testuser4",
+    "password": "123456",
+    "email": "testuser4@example.com",
+    "name": "Test User 4",
+    "phone": "+1234567894",
+    "role": "driver"
+  },
+  {
+    "username": "testuser5",
+    "password": "123456",
+    "email": "testuser5@example.com",
+    "name": "Test User 5",
+    "phone": "+1234567895",
+    "role": "driver"
+  },
+  {
+    "username": "testuser6",
+    "password": "123456",
+    "email": "testuser6@example.com",
+    "name": "Test User 6",
+    "phone": "+1234567896",
+    "role": "driver"
+  },
+  {
+    "username": "testuser7",
+    "password": "123456",
+    "email": "testuser7@example.com",
+    "name": "Test User 7",
+    "phone": "+1234567897",
+    "role": "driver"
+  },
+  {
+    "username": "testuser8",
+    "password": "123456",
+    "email": "testuser8@example.com",
+    "name": "Test User 8",
+    "phone": "+1234567898",
+    "role": "driver"
+  },
+  {
+    "username": "testuser9",
+    "password": "123456",
+    "email": "testuser9@example.com",
+    "name": "Test User 9",
+    "phone": "+1234567899",
+    "role": "driver"
+  },
+  {
+    "username": "testuser10",
+    "password": "123456",
+    "email": "testuser10@example.com",
+    "name": "Test User 10",
+    "phone": "+1234567900",
+    "role": "driver"
+  }
+]
