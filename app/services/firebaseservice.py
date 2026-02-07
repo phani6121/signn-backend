@@ -36,19 +36,28 @@ def initialize_firebase() -> firebase_admin.App:
     if _firebase_app is not None:
         return _firebase_app
     
-    # Get service account key from environment
+    # Prefer loading from a file path to avoid dotenv JSON parsing issues.
+    service_account_file = (
+        os.getenv("FIREBASE_SERVICE_ACCOUNT_FILE")
+        or os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    )
     service_account_json = os.getenv("FIREBASE_SERVICE_ACCOUNT_KEY")
     
-    if not service_account_json:
+    if not service_account_json and not service_account_file:
         logger.error("FIREBASE_SERVICE_ACCOUNT_KEY not found in environment variables.")
         raise ValueError(
-            "FIREBASE_SERVICE_ACCOUNT_KEY environment variable not found. "
-            "Ensure it is added to your Railway Variables tab."
+            "Firebase credentials not found. "
+            "Set FIREBASE_SERVICE_ACCOUNT_FILE (or GOOGLE_APPLICATION_CREDENTIALS) "
+            "to a JSON key file path, or set FIREBASE_SERVICE_ACCOUNT_KEY to the JSON string."
         )
     
     try:
-        # Parse the JSON string
-        service_account = json.loads(service_account_json)
+        if service_account_file:
+            with open(service_account_file, "r", encoding="utf-8") as f:
+                service_account = json.load(f)
+        else:
+            # Parse the JSON string
+            service_account = json.loads(service_account_json)
         
         # --- THE JWT SIGNATURE FIX ---
         # Railway and other providers often escape newlines. 
