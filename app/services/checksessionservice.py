@@ -3,7 +3,7 @@ Check Session Service - Manages check session lifecycle and data persistence
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 from uuid import uuid4
 
@@ -64,7 +64,7 @@ class CheckSessionService:
                 pass
 
             check_id = f"check_{uuid4().hex[:12]}"
-            now = datetime.utcnow().isoformat()
+            now = datetime.now(timezone.utc).isoformat()
             
             session_data = {
                 "shift_session_id": check_id,
@@ -94,7 +94,7 @@ class CheckSessionService:
     def update_session_consent(self, check_id: str, consent_agreed: bool) -> Dict[str, Any]:
         """Save consent step to session"""
         try:
-            now = datetime.utcnow().isoformat()
+            now = datetime.now(timezone.utc).isoformat()
             
             self.db.collection(self.collection).document(check_id).update({
                 "shift_session_id": check_id,
@@ -112,7 +112,7 @@ class CheckSessionService:
     def update_session_vision(self, check_id: str, vision_data: Dict[str, Any]) -> Dict[str, Any]:
         """Save vision analysis results to session"""
         try:
-            now = datetime.utcnow().isoformat()
+            now = datetime.now(timezone.utc).isoformat()
 
             vision_data["timestamp"] = now
             session = self.get_session(check_id) or {}
@@ -138,7 +138,7 @@ class CheckSessionService:
     def update_session_cognitive(self, check_id: str, cognitive_data: Dict[str, Any]) -> Dict[str, Any]:
         """Save cognitive test results to session"""
         try:
-            now = datetime.utcnow().isoformat()
+            now = datetime.now(timezone.utc).isoformat()
 
             cognitive_data["timestamp"] = now
             session = self.get_session(check_id) or {}
@@ -164,7 +164,7 @@ class CheckSessionService:
     def update_session_behavioral(self, check_id: str, behavioral_data: Dict[str, Any]) -> Dict[str, Any]:
         """Save behavioral assessment answers to session"""
         try:
-            now = datetime.utcnow().isoformat()
+            now = datetime.now(timezone.utc).isoformat()
 
             behavioral_data["timestamp"] = now
             session = self.get_session(check_id) or {}
@@ -202,7 +202,7 @@ class CheckSessionService:
             session = self.get_session(check_id)
             if session and session.get("created_at"):
                 created = datetime.fromisoformat(session["created_at"])
-                now_dt = datetime.utcnow()
+                now_dt = datetime.now(timezone.utc)
                 duration = (now_dt - created).total_seconds()
             else:
                 duration = None

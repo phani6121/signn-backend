@@ -78,5 +78,45 @@
     "name": "Test User 10",
     "phone": "+1234567900",
     "role": "driver"
+  },
+  {
+    "username": "phanindra",
+    "password": "123456",
+    "email": "phanindra.n@deployh.ai",
+    "name": "Phanindra",
+    "phone": "+1234567901",
+    "role": "Founding Engineer"
+  },
+  {
+    "username": "swathi",
+    "password": "123456",
+    "email": "swathi.v@deployh.ai",
+    "name": "Swathi V",
+    "phone": "+1234567902",
+    "role": "Founding Engineer"
+  },
+  {
+    "username": "kishore",
+    "password": "123456",
+    "email": "saikishore@deployh.ai",
+    "name": "Kishore",
+    "phone": "+1234567903",
+    "role": "CEO"
+  },
+  {
+    "username": "harikrishna",
+    "password": "123456",
+    "email": "admin@deployh.ai",
+    "name": "Harikrishna",
+    "phone": "+1234567904",
+    "role": "office admin"
+  },
+  {
+    "username": "chakri",
+    "password": "123456",
+    "email": "chakri@example.com",
+    "name": "Chakri",
+    "phone": "+1234567905",
+    "role": "Guest"
   }
 ]
