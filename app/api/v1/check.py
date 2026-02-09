@@ -61,7 +61,7 @@ async def create_session(request: CreateSessionRequest):
         }
     """
     try:
-        result = check_session_service.create_session(request.user_id)
+        result = check_session_service.create_session(request.user_id, request.shift_type)
         return result
     except Exception as e:
         logger.error(f"Error creating session: {e}")

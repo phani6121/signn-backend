@@ -45,7 +45,7 @@ def insert_test_users():
             # Hash the password
             hashed_password = hash_password(password)
             
-            # Prepare user document
+            # Prepare user document with test data fields
             user_doc = {
                 'username': username,
                 'password_hash': hashed_password,  # Store hashed password
@@ -54,16 +54,20 @@ def insert_test_users():
                 'phone': user_data.get('phone'),
                 'role': user_data.get('role', 'driver'),
                 'status': 'active',
-                'last_login': None,  # Will be updated on first login
-                'login_count': 0,
-                'created_at': datetime.utcnow(),
-                'updated_at': datetime.utcnow(),
             }
-            
-            # Create document using username as ID
-            firestore_manager.create_document('users', username, user_doc)
-            
-            print(f"OK Created user: {username}")
+
+            existing = firestore_manager.get_document('users', username)
+            if existing:
+                # Update only test data fields (don't overwrite login metadata/user_type)
+                firestore_manager.update_document('users', username, user_doc)
+                print(f"OK Updated user: {username}")
+            else:
+                user_doc['last_login'] = None  # Will be updated on first login
+                user_doc['login_count'] = 0
+                user_doc['created_at'] = datetime.utcnow()
+                user_doc['updated_at'] = datetime.utcnow()
+                firestore_manager.create_document('users', username, user_doc)
+                print(f"OK Created user: {username}")
             inserted_count += 1
             
         except Exception as e:
