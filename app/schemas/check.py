@@ -55,6 +55,7 @@ class CheckSession(BaseModel):
     """Complete check session tracking all steps"""
     check_id: str
     user_id: str
+    shift_type: Optional[str] = None
     
     # Step 1: Login
     login_timestamp: Optional[str] = None
@@ -88,6 +89,7 @@ class CheckSession(BaseModel):
 class CreateSessionRequest(BaseModel):
     """Request to create a new check session"""
     user_id: str
+    shift_type: Optional[str] = None
 
 
 class UpdateSessionRequest(BaseModel):

@@ -29,7 +29,7 @@ class CheckSessionService:
                 return session_id
         return f"{prefix}_{uuid4().hex[:8]}"
     
-    def create_session(self, user_id: str) -> Dict[str, Any]:
+    def create_session(self, user_id: str, shift_type: Optional[str] = None) -> Dict[str, Any]:
         """
         Create a new check session for a user
         
@@ -52,13 +52,22 @@ class CheckSessionService:
                 if docs:
                     existing_data = docs[0].to_dict() or {}
                     if not existing_data.get("finished_at"):
-                        check_id = docs[0].id
-                        logger.info(f"Reusing open shift session {check_id} for user {user_id}")
-                        return {
-                            "success": True,
-                            "check_id": check_id,
-                            "message": "Existing shift session reused"
-                        }
+                        existing_shift_type = existing_data.get("shift_type")
+                        if shift_type and existing_shift_type and shift_type != existing_shift_type:
+                            pass
+                        else:
+                            check_id = docs[0].id
+                            if shift_type and not existing_shift_type:
+                                self.db.collection(self.collection).document(check_id).update({
+                                    "shift_type": shift_type,
+                                    "updated_at": datetime.now(timezone.utc).isoformat()
+                                })
+                            logger.info(f"Reusing open shift session {check_id} for user {user_id}")
+                            return {
+                                "success": True,
+                                "check_id": check_id,
+                                "message": "Existing shift session reused"
+                            }
             except Exception:
                 # If query fails, fall back to creating a new session
                 pass
@@ -69,6 +78,7 @@ class CheckSessionService:
             session_data = {
                 "shift_session_id": check_id,
                 "user_id": user_id,
+                "shift_type": shift_type,
                 "consent": False,
                 "camera_enabled": False,
                 "started_at": now,
