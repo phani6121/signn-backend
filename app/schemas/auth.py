@@ -9,13 +9,15 @@ class LoginRequest(BaseModel):
     email: Optional[str] = None
     password: str
     language: Optional[str] = None
+    user_type: Optional[str] = None
    
     class Config:
         json_schema_extra = {
             "example": {
                 "username": "testuser1",
                 "password": "123456",
-                "language": "en"
+                "language": "en",
+                "user_type": "employee"
             }
         }
  
@@ -30,6 +32,7 @@ class LoginResponse(BaseModel):
     name: Optional[str] = None
     role: Optional[str] = None
     language: Optional[str] = None
+    user_type: Optional[str] = None
     login_count: Optional[int] = None
     last_login: Optional[datetime] = None
    
@@ -44,6 +47,7 @@ class LoginResponse(BaseModel):
                 "name": "Test User 1",
                 "role": "driver",
                 "language": "en",
+                "user_type": "employee",
                 "login_count": 5,
                 "last_login": "2026-02-04T10:30:00"
             }

@@ -72,6 +72,7 @@ def login(payload: LoginRequest) -> LoginResponse:
                 "password_hash": hash_password(payload.password),
                 "name": name,
                 "role": "driver",
+                "user_type": payload.user_type,
                 "status": "active",
                 "last_login": None,
                 "login_count": 0,
@@ -104,6 +105,14 @@ def login(payload: LoginRequest) -> LoginResponse:
                 {'language': payload.language},
                 merge=True,
             )
+        # Persist user_type from login if provided and not set yet
+        if payload.user_type and not user_doc.get('user_type'):
+            firestore_manager.create_document(
+                'users',
+                user_doc_id,
+                {'user_type': payload.user_type},
+                merge=True,
+            )
  
         login_update = {
             'last_login': datetime.utcnow(),
@@ -128,6 +137,7 @@ def login(payload: LoginRequest) -> LoginResponse:
             name=updated_user.get('name'),
             role=updated_user.get('role', 'driver'),
             language=updated_user.get('language'),
+            user_type=updated_user.get('user_type'),
             login_count=updated_user.get('login_count', 1),
             last_login=updated_user.get('last_login'),
         )
