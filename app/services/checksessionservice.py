@@ -118,6 +118,20 @@ class CheckSessionService:
             now = datetime.now(timezone.utc).isoformat()
 
             vision_data["timestamp"] = now
+            logger.info(
+                "vision_analysis_received check_id=%s payload_keys=%s payload=%s",
+                check_id,
+                sorted(list(vision_data.keys())),
+                {
+                    "intoxicationDetected": vision_data.get("intoxicationDetected"),
+                    "fatigueDetected": vision_data.get("fatigueDetected"),
+                    "stressDetected": vision_data.get("stressDetected"),
+                    "feverDetected": vision_data.get("feverDetected"),
+                    "eyewearDetected": vision_data.get("eyewearDetected"),
+                    "mood": vision_data.get("mood"),
+                    "confidence": vision_data.get("confidence"),
+                },
+            )
             session = self.get_session(check_id) or {}
             assessment_id = self._get_or_create_assessment_id(check_id, "vision_analysis", "vision")
 

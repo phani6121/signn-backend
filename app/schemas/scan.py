@@ -15,3 +15,8 @@ class ScanStartResponse(BaseModel):
 class ScanFrameRequest(BaseModel):
     scan_id: str
     frame_b64: Optional[str] = None
+    frame_data: Optional[dict] = None
+
+
+class ScanCompleteRequest(BaseModel):
+    scan_id: str
