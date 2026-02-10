@@ -127,6 +127,28 @@ class FirestoreManager:
             logger.error(f"Error querying documents: {e}")
             raise
 
+    def get_collection(
+        self,
+        collection: str,
+        filters: Optional[Dict[str, Any]] = None,
+        limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """
+        Convenience helper to fetch documents with simple equality filters.
+        """
+        try:
+            query = self.db.collection(collection)
+            if filters:
+                for field, value in filters.items():
+                    query = query.where(field, "==", value)
+            docs = query.limit(limit).stream()
+            results = [doc.to_dict() for doc in docs]
+            logger.info(f"Collection fetch on {collection}: found {len(results)} documents")
+            return results
+        except Exception as e:
+            logger.error(f"Error fetching collection: {e}")
+            raise
+
     def get_document_by_field(
         self,
         collection: str,
