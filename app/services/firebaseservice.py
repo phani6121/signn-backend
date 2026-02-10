@@ -18,7 +18,8 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 # Note: On Railway, system environment variables take precedence over .env files.
 env_path = Path(__file__).resolve().parents[2] / ".env.local"
-load_dotenv(dotenv_path=env_path, override=False)
+# Ensure backend .env.local wins over any inherited shell env.
+load_dotenv(dotenv_path=env_path, override=True)
 
 # Global Firebase app and Firestore client
 _firebase_app: Optional[firebase_admin.App] = None
@@ -93,8 +94,22 @@ def get_firestore_client() -> Any:
     # Ensure Firebase is initialized before requesting the client
     initialize_firebase()
     
-    _firestore_client = firestore.client()
-    logger.info("Firestore client initialized successfully.")
+    database_id = os.getenv("FIREBASE_DATABASE_ID")
+    try:
+        if database_id:
+            _firestore_client = firestore.client(app=_firebase_app, database_id=database_id)
+        else:
+            _firestore_client = firestore.client(app=_firebase_app)
+        if database_id:
+            logger.info(f"Firestore client initialized successfully for database: {database_id}")
+        else:
+            logger.info("Firestore client initialized successfully for default database.")
+    except TypeError:
+        # Older firebase-admin doesn't support the database kwarg.
+        _firestore_client = firestore.client(app=_firebase_app)
+        logger.warning(
+            "Firestore client does not support database selection; using default database."
+        )
     return _firestore_client
 
 

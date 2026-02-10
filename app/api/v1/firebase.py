@@ -127,9 +127,15 @@ async def health_check():
         from app.services.firebaseservice import get_firestore_client
         db = get_firestore_client()
         collections = list(db.collections())
+        import os
+        database_id = getattr(db, "_database_id", None) or getattr(db, "_database", None)
+        database_id_attr = getattr(db, "_database_id", None) or getattr(db, "_database", None)
         return {
             "status": "healthy",
             "firebase": "connected",
+            "database_id": database_id or "(default)",
+            "database_id_env": os.getenv("FIREBASE_DATABASE_ID") or "",
+            "database_id_attr": database_id_attr or "",
             "collections_count": len(collections),
             "collections": [c.id for c in collections]
         }
