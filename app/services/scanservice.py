@@ -1,4 +1,5 @@
-﻿from typing import Dict
+﻿import logging
+from typing import Dict
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -12,6 +13,8 @@ from .rules.fatigue import calculate_fatigue
 from .rules.stress import calculate_stress
 from .rules.mood import calculate_mood
 from .rules.shift_risk import calculate_shift_risk
+
+logger = logging.getLogger(__name__)
 
 
 def start_scan(payload: ScanStartRequest) -> ScanStartResponse:
@@ -133,6 +136,42 @@ def add_scan_frame(payload: ScanFrameRequest) -> Dict[str, object]:
         mood=mood,
         fatigue_score=metrics.get("eye_blink_rate", 0),
         eye_aspect_ratio=metrics.get("eye_aspect_ratio", 0),
+    )
+    shift_risk_level = shift_risk.get("shift_risk") if isinstance(shift_risk, dict) else None
+    logger.info(
+        "scan_metrics shift_id=%s scan_id=%s fatigue=%s stress=%s mood=%s shift_risk=%s eye_blink_rate=%s eye_aspect_ratio=%s face_visibility=%s brow_furrow=%s lip_tighten=%s mouth_open=%s head_stability=%s head_tilt_variance=%s blink_variance=%s",
+        shift_id,
+        payload.scan_id,
+        fatigue,
+        stress,
+        mood,
+        shift_risk,
+        metrics.get("eye_blink_rate"),
+        metrics.get("eye_aspect_ratio"),
+        metrics.get("face_visibility"),
+        metrics.get("brow_furrow"),
+        metrics.get("lip_tighten"),
+        metrics.get("mouth_open"),
+        metrics.get("head_stability"),
+        metrics.get("head_tilt_variance"),
+        metrics.get("blink_variance"),
+    )
+
+    shift_update: Dict[str, object] = {
+        "mood": mood,
+        "shift_risk_level": shift_risk_level,
+    }
+    if fatigue == "detected":
+        shift_update["fatigue_detected"] = True
+    if stress == "detected":
+        shift_update["stress_detected"] = True
+    if shift_risk_level == "HIGH":
+        shift_update["shift_risk_high_detected"] = True
+    firestore_manager.create_document(
+        "shift",
+        shift_id,
+        shift_update,
+        merge=True,
     )
 
     # -----------------------------
