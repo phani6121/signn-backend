@@ -158,6 +158,49 @@ class CheckSessionService:
             now = datetime.now(timezone.utc).isoformat()
 
             cognitive_data["timestamp"] = now
+            baseline_latency = 300.0
+            round_latencies = cognitive_data.get("round_latencies") or []
+            normalized_rounds = []
+            for value in round_latencies:
+                if isinstance(value, (int, float)):
+                    normalized_rounds.append(float(value))
+
+            latency_val = cognitive_data.get("latency")
+            latency = float(latency_val) if isinstance(latency_val, (int, float)) else None
+
+            if normalized_rounds:
+                per_dot = " | ".join(
+                    f"dot_{idx + 1}={round(ms)}ms" for idx, ms in enumerate(normalized_rounds)
+                )
+                sum_rounds = sum(normalized_rounds)
+                avg_rounds = sum_rounds / len(normalized_rounds)
+                logger.info(
+                    "[COGNITIVE] check_id=%s %s | sum=%sms | avg=%sms | client_latency=%sms",
+                    check_id,
+                    per_dot,
+                    round(sum_rounds),
+                    round(avg_rounds),
+                    round(latency) if latency is not None else "n/a",
+                )
+
+            if latency is not None:
+                delta = ((latency - baseline_latency) / baseline_latency) * 100.0
+                decision = (
+                    "RED (Critical Cognitive Fatigue)"
+                    if delta > 40
+                    else "YELLOW (Cognitive delay detected)"
+                    if delta > 20
+                    else "PASS"
+                )
+                logger.info(
+                    "[COGNITIVE] check_id=%s baseline=%sms latency=%sms delta=%.2f%% thresholds: yellow>20 red>40 decision=%s",
+                    check_id,
+                    round(baseline_latency),
+                    round(latency),
+                    delta,
+                    decision,
+                )
+
             session = self.get_session(check_id) or {}
             assessment_id = self._get_or_create_assessment_id(check_id, "cognitive_test", "cog")
 
