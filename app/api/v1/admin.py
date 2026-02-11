@@ -49,6 +49,19 @@ def _parse_datetime(value: Optional[object]) -> Optional[datetime]:
         except Exception:
             return None
     return None
+
+
+def _parse_float(value: Optional[object]) -> Optional[float]:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return None
  
  
 class RecentReadinessItem(BaseModel):
@@ -69,29 +82,41 @@ async def get_recent_readiness(limit: int = Query(5, ge=5, le=10)):
     """
     try:
         db = get_firestore_client()
+        fetch_limit = max(limit * 5, limit)
         query = (
             db.collection("shift")
             .order_by("updated_at", direction=firestore.Query.DESCENDING)
-            .limit(limit)
+            .limit(fetch_limit)
         )
         docs = list(query.stream())
  
         items: List[RecentReadinessItem] = []
         for doc in docs:
             data = doc.to_dict() or {}
+            overall_status = (data.get("overall_status") or "").upper()
+            final_ts = (
+                data.get("final_result_timestamp")
+                or data.get("finished_at")
+                or data.get("updated_at")
+            )
+
+            # Only finalized checks should appear in recent readiness feed.
+            if overall_status not in {"GREEN", "YELLOW", "RED"}:
+                continue
+            if not final_ts:
+                continue
+
             items.append(
                 RecentReadinessItem(
                     rider_id=data.get("user_id"),
-                    status=data.get("overall_status"),
+                    status=overall_status,
                     reason=data.get("status_with_reason") or data.get("status_reason"),
                     check_id=data.get("shift_session_id") or doc.id,
-                    updated_at=_to_iso(
-                        data.get("updated_at")
-                        or data.get("finished_at")
-                        or data.get("created_at")
-                    ),
+                    updated_at=_to_iso(final_ts),
                 )
             )
+            if len(items) >= limit:
+                break
  
         return items
     except Exception as e:
@@ -105,6 +130,7 @@ class LedgerItem(BaseModel):
     reason: Optional[str] = None
     check_id: Optional[str] = None
     updated_at: Optional[str] = None
+    latency_ms: Optional[float] = None
  
  
 class LedgerResponse(BaseModel):
@@ -149,17 +175,44 @@ async def get_compliance_ledger(
         items: List[LedgerItem] = []
         for doc in docs:
             data = doc.to_dict() or {}
+            overall_status = (data.get("overall_status") or "").upper()
+            final_ts = (
+                data.get("final_result_timestamp")
+                or data.get("finished_at")
+                or data.get("updated_at")
+            )
+
+            # Only finalized checks should appear in compliance ledger.
+            if overall_status not in {"GREEN", "YELLOW", "RED"}:
+                continue
+            if not final_ts:
+                continue
+
+            latency_ms = _parse_float(data.get("latency_ms"))
+            if latency_ms is None:
+                latency_ms = _parse_float(data.get("latency"))
+            if latency_ms is None:
+                latency_ms = _parse_float((data.get("cognitive_test") or {}).get("latency"))
+            if latency_ms is None:
+                cognitive_doc = (
+                    db.collection("shift")
+                    .document(doc.id)
+                    .collection("assessments")
+                    .document("cognitive_test")
+                    .get()
+                )
+                if cognitive_doc.exists:
+                    cognitive_data = cognitive_doc.to_dict() or {}
+                    latency_ms = _parse_float(cognitive_data.get("latency"))
+
             items.append(
                 LedgerItem(
                     rider_id=data.get("user_id"),
-                    status=data.get("overall_status"),
+                    status=overall_status,
                     reason=data.get("status_with_reason") or data.get("status_reason"),
                     check_id=data.get("shift_session_id") or doc.id,
-                    updated_at=_to_iso(
-                        data.get("updated_at")
-                        or data.get("finished_at")
-                        or data.get("created_at")
-                    ),
+                    updated_at=_to_iso(final_ts),
+                    latency_ms=latency_ms,
                 )
             )
  
