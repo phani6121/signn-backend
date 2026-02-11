@@ -33,6 +33,7 @@ class UpdateVisionRequest(BaseModel):
 class UpdateCognitiveRequest(BaseModel):
     check_id: str
     latency: Optional[float] = None
+    round_latencies: Optional[list[float]] = None
     score: Optional[float] = None
     passed: Optional[bool] = None
 
@@ -141,6 +142,7 @@ async def save_cognitive(request: UpdateCognitiveRequest):
     try:
         cognitive_data = {
             "latency": request.latency,
+            "round_latencies": request.round_latencies,
             "score": request.score,
             "passed": request.passed
         }
