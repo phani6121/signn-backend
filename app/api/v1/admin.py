@@ -28,6 +28,9 @@ _dashboard_metrics_cache: Dict[str, Tuple[float, "DashboardMetricsResponse"]] = 
 _RECENT_CACHE_TTL_SECONDS = 8
 _recent_readiness_cache: Dict[str, Tuple[float, List["RecentReadinessItem"]]] = {}
 
+_LEDGER_CACHE_TTL_SECONDS = 20
+_compliance_ledger_cache: Dict[str, Tuple[float, "LedgerResponse"]] = {}
+
 
 # -----------------------------
 # Helpers
@@ -241,15 +244,41 @@ async def get_compliance_ledger(
         if end_date and end_dt is None:
             raise HTTPException(status_code=400, detail="Invalid end_date format.")
 
-        # Avoid composite-index dependency: only order_by, filter in-memory.
-        base_query = db.collection("shift").order_by("updated_at", direction=firestore.Query.DESCENDING)
+        cache_key = (
+            f"ledger:{page}:{limit}:"
+            f"{normalized_status or '-'}:{rider_id or '-'}:"
+            f"{start_dt.isoformat() if start_dt else '-'}:{end_dt.isoformat() if end_dt else '-'}"
+        )
+        cache_hit = _compliance_ledger_cache.get(cache_key)
+        if cache_hit and (time.time() - cache_hit[0]) < _LEDGER_CACHE_TTL_SECONDS:
+            return cache_hit[1]
+
+        # Try optimized query-level filtering first.
+        apply_query_filters = True
+        query_filters_fallback_used = False
+        base_query = db.collection("shift")
+        if normalized_status:
+            if FieldFilter is not None:
+                base_query = base_query.where(
+                    filter=FieldFilter("overall_status", "==", normalized_status)
+                )
+            else:
+                base_query = base_query.where("overall_status", "==", normalized_status)
+        if rider_id:
+            if FieldFilter is not None:
+                base_query = base_query.where(filter=FieldFilter("user_id", "==", rider_id))
+            else:
+                base_query = base_query.where("user_id", "==", rider_id)
+        base_query = base_query.order_by("updated_at", direction=firestore.Query.DESCENDING)
 
         offset = (page - 1) * limit
-        batch_size = min(max(limit * 2, 100), 500)
-        max_batches = 40
+        batch_size = min(max(limit * 2, 100), 300)
+        max_batches = 20
+        max_scanned_docs = min(max(offset + (limit * 10), 500), 5000)
 
         last_doc = None
         batches = 0
+        scanned_docs = 0
         matched_seen = 0
         items: List[LedgerItem] = []
 
@@ -258,14 +287,37 @@ async def get_compliance_ledger(
             if last_doc is not None:
                 query = query.start_after(last_doc)
 
-            docs = list(query.limit(batch_size).stream())
+            try:
+                docs = list(query.limit(batch_size).stream())
+            except Exception as query_error:
+                # Composite index may be missing in some deployments.
+                # Fall back to unfiltered query + in-memory filtering.
+                if apply_query_filters and not query_filters_fallback_used:
+                    logger.warning(
+                        "Ledger optimized query failed, falling back to in-memory filtering: %s",
+                        query_error,
+                    )
+                    apply_query_filters = False
+                    query_filters_fallback_used = True
+                    base_query = db.collection("shift").order_by(
+                        "updated_at", direction=firestore.Query.DESCENDING
+                    )
+                    last_doc = None
+                    batches = 0
+                    scanned_docs = 0
+                    matched_seen = 0
+                    items = []
+                    continue
+                raise
             if not docs:
                 break
 
+            scanned_docs += len(docs)
             for doc in docs:
                 data = doc.to_dict() or {}
 
-                if rider_id and str(data.get("user_id") or "") != rider_id:
+                # Apply filters in-memory when query-level filters are unavailable.
+                if (not apply_query_filters) and rider_id and str(data.get("user_id") or "") != rider_id:
                     continue
 
                 final_ts = (
@@ -286,24 +338,29 @@ async def get_compliance_ledger(
                 row_status = (data.get("overall_status") or "").upper()
                 if row_status not in {"GREEN", "YELLOW", "RED"}:
                     continue
-                if normalized_status and row_status != normalized_status:
+                if (not apply_query_filters) and normalized_status and row_status != normalized_status:
                     continue
 
-                # If GREEN tab is requested, ensure all 3 checks completed & passed.
+                # Keep GREEN eligibility check local to avoid N+1 reads.
+                # Prefer denormalized fields on parent doc when present.
                 if normalized_status == "GREEN":
-                    check_id = data.get("shift_session_id") or doc.id
-                    assessments = db.collection("shift").document(str(check_id)).collection("assessments")
-                    vision_doc = assessments.document("vision_analysis").get()
-                    cognitive_doc = assessments.document("cognitive_test").get()
-                    behavioral_doc = assessments.document("behavioral_assessment").get()
-                    if not vision_doc.exists or not cognitive_doc.exists or not behavioral_doc.exists:
-                        continue
-                    cognitive_data = cognitive_doc.to_dict() or {}
-                    behavioral_data = behavioral_doc.to_dict() or {}
-                    if cognitive_data.get("passed") is not True:
-                        continue
-                    answers = behavioral_data.get("answers")
-                    if not isinstance(answers, list) or len(answers) == 0:
+                    cognitive_passed = (
+                        data.get("cognitive_passed") is True
+                        or ((data.get("cognitive_test") or {}).get("passed") is True)
+                    )
+                    answers = (
+                        data.get("behavioral_answers")
+                        or ((data.get("behavioral_assessment") or {}).get("answers"))
+                    )
+                    behavioral_count = 0
+                    if isinstance(answers, list):
+                        behavioral_count = len(answers)
+                    elif isinstance(answers, dict):
+                        behavioral_count = len(answers.keys())
+                    elif isinstance(data.get("behavioral_answer_count"), int):
+                        behavioral_count = int(data.get("behavioral_answer_count") or 0)
+
+                    if not cognitive_passed or behavioral_count <= 0:
                         continue
 
                 matched_seen += 1
@@ -316,20 +373,6 @@ async def get_compliance_ledger(
                     latency_ms = _parse_float(data.get("latency"))
                 if latency_ms is None:
                     latency_ms = _parse_float((data.get("cognitive_test") or {}).get("latency"))
-
-                if latency_ms is None:
-                    # Optional extra read if not present inline
-                    check_id = data.get("shift_session_id") or doc.id
-                    cognitive_doc = (
-                        db.collection("shift")
-                        .document(str(check_id))
-                        .collection("assessments")
-                        .document("cognitive_test")
-                        .get()
-                    )
-                    if cognitive_doc.exists:
-                        cognitive_data = cognitive_doc.to_dict() or {}
-                        latency_ms = _parse_float(cognitive_data.get("latency"))
 
                 items.append(
                     LedgerItem(
@@ -346,8 +389,12 @@ async def get_compliance_ledger(
 
             last_doc = docs[-1]
             batches += 1
+            if scanned_docs >= max_scanned_docs:
+                break
 
-        return LedgerResponse(page=page, limit=limit, items=items)
+        response = LedgerResponse(page=page, limit=limit, items=items)
+        _compliance_ledger_cache[cache_key] = (time.time(), response)
+        return response
 
     except HTTPException:
         raise
