@@ -1,5 +1,5 @@
-from typing import Dict, Any, List, Optional
-from datetime import datetime
+from typing import Dict, Any, List, Optional, Set
+from datetime import datetime, timezone
 import re
 
 from fastapi import APIRouter, HTTPException
@@ -43,8 +43,13 @@ def login_route(payload: LoginRequest) -> LoginResponse:
 _TZ_RE = re.compile(r"(Z|[+-]\d{2}:\d{2})$")
 
 
-def _normalize_iso(value: Optional[str]) -> Optional[str]:
-    if not value:
+def _normalize_iso(value: Optional[object]) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        dt = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        return dt.isoformat()
+    if not isinstance(value, str):
         return None
     if _TZ_RE.search(value):
         return value.replace("Z", "+00:00")
@@ -52,12 +57,13 @@ def _normalize_iso(value: Optional[str]) -> Optional[str]:
     return f"{value}+00:00"
 
 
-def _parse_iso(value: Optional[str]) -> Optional[datetime]:
+def _parse_iso(value: Optional[object]) -> Optional[datetime]:
     normalized = _normalize_iso(value)
     if not normalized:
         return None
     try:
-        return datetime.fromisoformat(normalized)
+        parsed = datetime.fromisoformat(normalized)
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
     except Exception:
         return None
 
@@ -71,15 +77,82 @@ def _session_timestamp(session: Dict[str, Any]) -> Optional[str]:
     )
 
 
+def _parse_float(value: Optional[object]) -> Optional[float]:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _resolve_user_ids(user_id: str, username: Optional[str] = None) -> Set[str]:
+    """
+    Resolve possible aliases for the same user (document id / username / email).
+    This prevents missing checks when sessions were saved with a different identifier.
+    """
+    aliases: Set[str] = {user_id}
+    if isinstance(username, str) and username.strip():
+        aliases.add(username.strip())
+    db = check_session_service.db
+
+    try:
+        user_doc = db.collection("users").document(user_id).get()
+        if user_doc.exists:
+            data = user_doc.to_dict() or {}
+            for key in ("username", "email"):
+                value = data.get(key)
+                if isinstance(value, str) and value.strip():
+                    aliases.add(value.strip())
+    except Exception:
+        pass
+
+    # If login identifier is username/email, resolve the actual user document id as well.
+    for field in ("username", "email"):
+        try:
+            docs = list(
+                db.collection("users")
+                .where(field, "==", user_id)
+                .limit(1)
+                .stream()
+            )
+            if docs:
+                doc = docs[0]
+                aliases.add(doc.id)
+                data = doc.to_dict() or {}
+                for key in ("username", "email"):
+                    value = data.get(key)
+                    if isinstance(value, str) and value.strip():
+                        aliases.add(value.strip())
+        except Exception:
+            continue
+
+    return aliases
+
+
 @router.get("/user/dashboard")
-def user_dashboard(user_id: str) -> Dict[str, object]:
+def user_dashboard(user_id: str, username: Optional[str] = None) -> Dict[str, object]:
     """
     User dashboard summary with recent checks.
 
     Example:
         GET /api/v1/user/dashboard?user_id=testuser1
     """
-    sessions = check_session_service.get_user_sessions(user_id)
+    resolved_user_ids = _resolve_user_ids(user_id, username)
+    sessions_map: Dict[str, Dict[str, Any]] = {}
+    for uid in resolved_user_ids:
+        for session in check_session_service.get_user_sessions(uid):
+            check_id = (
+                session.get("shift_session_id")
+                or session.get("check_id")
+                or f"session_{len(sessions_map)}"
+            )
+            sessions_map[str(check_id)] = session
+    sessions = list(sessions_map.values())
     # Only include completed sessions with a final status/timestamp
     completed_sessions = [
         s
@@ -90,7 +163,7 @@ def user_dashboard(user_id: str) -> Dict[str, object]:
     ]
     sessions_sorted = sorted(
         completed_sessions,
-        key=lambda s: _parse_iso(_session_timestamp(s)) or datetime.min,
+        key=lambda s: _parse_iso(_session_timestamp(s)) or datetime.min.replace(tzinfo=timezone.utc),
         reverse=True,
     )
 
@@ -98,13 +171,39 @@ def user_dashboard(user_id: str) -> Dict[str, object]:
     recent_checks: List[Dict[str, Any]] = []
     for session in recent_sessions:
         detection = session.get("detection_report") or {}
+        latency_ms = _parse_float(detection.get("latency_ms"))
+        if latency_ms is None:
+            latency_ms = _parse_float(detection.get("latency"))
+        if latency_ms is None:
+            latency_ms = _parse_float(session.get("latency_ms"))
+        if latency_ms is None:
+            latency_ms = _parse_float(session.get("latency"))
+        if latency_ms is None:
+            latency_ms = _parse_float((session.get("cognitive_test") or {}).get("latency"))
+        if latency_ms is None:
+            check_id = session.get("shift_session_id") or session.get("check_id")
+            if check_id:
+                try:
+                    cognitive_doc = (
+                        check_session_service.db
+                        .collection("shift")
+                        .document(str(check_id))
+                        .collection("assessments")
+                        .document("cognitive_test")
+                        .get()
+                    )
+                    if cognitive_doc.exists:
+                        cognitive_data = cognitive_doc.to_dict() or {}
+                        latency_ms = _parse_float(cognitive_data.get("latency"))
+                except Exception:
+                    latency_ms = None
         recent_checks.append(
             {
                 "check_id": session.get("shift_session_id") or session.get("check_id"),
                 "timestamp": _session_timestamp(session),
                 "overall_status": session.get("overall_status"),
                 "status_reason": session.get("status_reason"),
-                "latency_ms": detection.get("latency_ms") or detection.get("latency"),
+                "latency_ms": latency_ms,
                 "session_duration_seconds": session.get("session_duration_seconds"),
             }
         )
