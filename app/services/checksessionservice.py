@@ -204,11 +204,24 @@ class CheckSessionService:
             session = self.get_session(check_id) or {}
             assessment_id = self._get_or_create_assessment_id(check_id, "cognitive_test", "cog")
 
-            self.db.collection(self.collection).document(check_id).update({
+            parent_update = {
                 "shift_session_id": check_id,
                 "user_id": session.get("user_id"),
-                "updated_at": now
-            })
+                "updated_at": now,
+            }
+            if latency is not None:
+                # Denormalize latency onto the parent shift doc for ledger/report queries.
+                parent_update["latency_ms"] = latency
+                parent_update["latency"] = latency
+                parent_update["cognitive_test"] = {
+                    "latency": latency,
+                    "passed": cognitive_data.get("passed"),
+                    "score": cognitive_data.get("score"),
+                    "round_latencies": normalized_rounds if normalized_rounds else None,
+                    "timestamp": now,
+                }
+
+            self.db.collection(self.collection).document(check_id).update(parent_update)
             self.db.collection(self.collection).document(check_id).collection("assessments").document("cognitive_test").set({
                 "session_id": assessment_id,
                 "shift_session_id": check_id,
