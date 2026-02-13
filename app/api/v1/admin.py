@@ -656,6 +656,7 @@ async def get_dashboard_metrics(
                 continue
 
             check_id = data.get("shift_session_id") or data.get("check_id") or doc_id
+            
             assessments = db.collection("shift").document(str(check_id)).collection("assessments")
 
             vision_doc = assessments.document("vision_analysis").get()
