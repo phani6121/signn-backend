@@ -73,6 +73,32 @@ def _parse_float(value: Optional[object]) -> Optional[float]:
     return None
 
 
+def _get_latency_ms(data: dict, db, check_id: str) -> Optional[float]:
+    latency_ms = _parse_float(data.get("latency_ms"))
+    if latency_ms is None:
+        latency_ms = _parse_float(data.get("latency"))
+    if latency_ms is None:
+        latency_ms = _parse_float((data.get("cognitive_test") or {}).get("latency"))
+    if latency_ms is not None:
+        return latency_ms
+
+    # Backward-compatibility path: older records stored cognitive latency only in assessments.
+    try:
+        cognitive_doc = (
+            db.collection("shift")
+            .document(str(check_id))
+            .collection("assessments")
+            .document("cognitive_test")
+            .get()
+        )
+        if cognitive_doc.exists:
+            cognitive_data = cognitive_doc.to_dict() or {}
+            return _parse_float(cognitive_data.get("latency"))
+    except Exception:
+        return None
+    return None
+
+
 def _is_final_status(status: Optional[object]) -> bool:
     s = (status or "")
     if not isinstance(s, str):
@@ -219,9 +245,9 @@ class LedgerResponse(BaseModel):
 
 
 @router.get("/compliance/ledger", response_model=LedgerResponse)
-async def get_compliance_ledger(
+def get_compliance_ledger(
     page: int = Query(1, ge=1),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(20, ge=1, le=100),
     status: Optional[str] = Query(default=None),
     rider_id: Optional[str] = Query(default=None),
     start_date: Optional[str] = Query(default=None),
@@ -270,6 +296,88 @@ async def get_compliance_ledger(
             else:
                 base_query = base_query.where("user_id", "==", rider_id)
         base_query = base_query.order_by("updated_at", direction=firestore.Query.DESCENDING)
+
+        # Fast path for first page: avoid deep scans and offsets.
+        if page == 1:
+            prefetch = min(max(limit * 3, 60), 200)
+            try:
+                docs = list(base_query.limit(prefetch).stream())
+            except Exception:
+                # Fallback without query-level filters if composite indexes are unavailable.
+                docs = list(
+                    db.collection("shift")
+                    .order_by("updated_at", direction=firestore.Query.DESCENDING)
+                    .limit(prefetch)
+                    .stream()
+                )
+
+            items: List[LedgerItem] = []
+            for doc in docs:
+                data = doc.to_dict() or {}
+
+                if rider_id and str(data.get("user_id") or "") != rider_id:
+                    continue
+
+                final_ts = (
+                    data.get("final_result_timestamp")
+                    or data.get("finished_at")
+                    or data.get("updated_at")
+                    or data.get("created_at")
+                )
+                ts = _parse_datetime(final_ts)
+                if ts is None:
+                    continue
+
+                if start_dt and ts < start_dt:
+                    continue
+                if end_dt and ts > end_dt:
+                    continue
+
+                row_status = (data.get("overall_status") or "").upper()
+                if row_status not in {"GREEN", "YELLOW", "RED"}:
+                    continue
+                if normalized_status and row_status != normalized_status:
+                    continue
+
+                if normalized_status == "GREEN":
+                    cognitive_passed = (
+                        data.get("cognitive_passed") is True
+                        or ((data.get("cognitive_test") or {}).get("passed") is True)
+                    )
+                    answers = (
+                        data.get("behavioral_answers")
+                        or ((data.get("behavioral_assessment") or {}).get("answers"))
+                    )
+                    behavioral_count = 0
+                    if isinstance(answers, list):
+                        behavioral_count = len(answers)
+                    elif isinstance(answers, dict):
+                        behavioral_count = len(answers.keys())
+                    elif isinstance(data.get("behavioral_answer_count"), int):
+                        behavioral_count = int(data.get("behavioral_answer_count") or 0)
+
+                    if not cognitive_passed or behavioral_count <= 0:
+                        continue
+
+                check_id = data.get("shift_session_id") or doc.id
+                latency_ms = _get_latency_ms(data, db, str(check_id))
+
+                items.append(
+                    LedgerItem(
+                        rider_id=data.get("user_id"),
+                        status=row_status,
+                        reason=data.get("status_with_reason") or data.get("status_reason"),
+                        check_id=check_id,
+                        updated_at=_to_iso(ts),
+                        latency_ms=latency_ms,
+                    )
+                )
+                if len(items) >= limit:
+                    break
+
+            response = LedgerResponse(page=page, limit=limit, items=items)
+            _compliance_ledger_cache[cache_key] = (time.time(), response)
+            return response
 
         offset = (page - 1) * limit
         batch_size = min(max(limit * 2, 100), 300)
@@ -368,18 +476,15 @@ async def get_compliance_ledger(
                     continue
 
                 # latency (best-effort)
-                latency_ms = _parse_float(data.get("latency_ms"))
-                if latency_ms is None:
-                    latency_ms = _parse_float(data.get("latency"))
-                if latency_ms is None:
-                    latency_ms = _parse_float((data.get("cognitive_test") or {}).get("latency"))
+                check_id = data.get("shift_session_id") or doc.id
+                latency_ms = _get_latency_ms(data, db, str(check_id))
 
                 items.append(
                     LedgerItem(
                         rider_id=data.get("user_id"),
                         status=row_status,
                         reason=data.get("status_with_reason") or data.get("status_reason"),
-                        check_id=data.get("shift_session_id") or doc.id,
+                        check_id=check_id,
                         updated_at=_to_iso(ts),
                         latency_ms=latency_ms,
                     )
